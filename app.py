@@ -61,7 +61,6 @@ st.title("🧠 Neuro-Notes")
 st.caption("Transform audio lectures and voice memos into visual interactive study guides.")
 
 # 2. Initialization & Security Check
-# Access key safely through Streamlit secrets management
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
@@ -113,15 +112,15 @@ if client and uploaded_file:
                     "}"
                 )
                 
-                # Invoke Gemini 2.5 Flash for rapid audio understanding multimodal loops
-response = client.models.generate_content(
-    model='gemini-2.5-flash',  # ❌ Old, unavailable model name
-    contents=[prompt, audio_media],
-    config=types.GenerateContentConfig(
-        response_mime_type="application/json",
-        temperature=0.2
-    )
-)
+                # Invoke Gemini 3.5 Flash for rapid audio understanding multimodal loops
+                response = client.models.generate_content(
+                    model='gemini-3.5-flash',
+                    contents=[prompt, audio_media],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.2
+                    )
+                )
                 
                 # Cleanup the cloud uploaded file reference after processing
                 client.files.delete(name=audio_media.name)
