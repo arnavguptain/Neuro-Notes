@@ -1,11 +1,27 @@
 import streamlit as st
 import os
-import json
 import tempfile
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
+from typing import List
 
-# 1. Page Configuration
+# 1. Define Native Pydantic Schemas for Strict Constraint Output
+class Flashcard(BaseModel):
+    front: str = Field(description="The conceptual question or definition term.")
+    back: str = Field(description="The answer or detailed explanation.")
+
+class QuizItem(BaseModel):
+    question: str = Field(description="The multiple choice question text based on the audio lecture.")
+    options: List[str] = Field(description="Exactly 4 realistic option choices for the user.")
+    correct_index: int = Field(description="The index (0-3) of the correct option inside the options array.")
+
+class StudyGuideSchema(BaseModel):
+    summary: str = Field(description="A comprehensive, detailed markdown summary of the major themes in the audio.")
+    flashcards: List[Flashcard] = Field(description="A list of 4 high-quality concept flashcards.")
+    quiz: List[QuizItem] = Field(description="A list of 3 relevant diagnostic multiple-choice questions.")
+
+# 2. Page Configuration
 st.set_page_config(page_title="Neuro-Notes: AI Study Guide", page_icon="🧠", layout="wide")
 
 # Custom CSS for the 3D Flipping Flashcards
@@ -60,23 +76,21 @@ st.markdown("""
 st.title("🧠 Neuro-Notes")
 st.caption("Transform audio lectures and voice memos into visual interactive study guides.")
 
-# 2. Initialization & Security Check
+# 3. Initialization & Security Check
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
     st.info("To run this locally without deployment, add your API key below.", icon="🔑")
     api_key = st.text_input("Enter Gemini API Key", type="password")
 
-# Instantiate the modern Google GenAI Client
 client = genai.Client(api_key=api_key) if api_key else None
 
-# Maintain persistent state for quiz progress
 if "quiz_answers" not in st.session_state:
     st.session_state.quiz_answers = {}
 if "quiz_submitted" not in st.session_state:
     st.session_state.quiz_submitted = False
 
-# 3. Sidebar Uploader
+# 4. Sidebar Uploader
 with st.sidebar:
     st.header("Upload Lecture Audio")
     uploaded_file = st.file_uploader("Choose an audio file...", type=["mp3", "wav", "m4a", "ogg"])
@@ -84,49 +98,38 @@ with st.sidebar:
     if uploaded_file:
         st.audio(uploaded_file, format=uploaded_file.type)
 
-# 4. Processing Engine
+# 5. Processing Engine
 if client and uploaded_file:
     if st.sidebar.button("✨ Generate Study Guide", type="primary"):
         with st.spinner("🧠 Gemini is listening to your lecture and mapping concepts..."):
             
-            # Save Streamlit's UploadedFile to a temporary local file so the SDK can ingest it
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as temp_file:
                 temp_file.write(uploaded_file.read())
                 temp_file_path = temp_file.name
             
             try:
-                # Use File API for uploading large media content chunks
+                # Use File API for safe uploading of multimedia contents
                 audio_media = client.files.upload(file=temp_file_path)
                 
-                # Prompt enforcing Structured JSON Output mapping to avoid execution breakages
-                prompt = (
-                    "Analyze this audio lecture thoroughly. Generate a structured response containing: "
-                    "1. A comprehensive text summary broken into major themes. "
-                    "2. A set of 4 conceptual flashcards (each with a front question and back answer). "
-                    "3. A 3-question multiple-choice quiz based on the key definitions discussed. "
-                    "Return the response strictly adhering to JSON format matching this schema:\n"
-                    "{\n"
-                    "  'summary': 'string markdown format summary',\n"
-                    "  'flashcards': [{'front': 'string', 'back': 'string'}],\n"
-                    "  'quiz': [{'question': 'string', 'options': ['string'], 'correct_index': 0}]\n"
-                    "}"
-                )
+                # Base prompt telling the model what to extract from the source audio asset
+                prompt = "Thoroughly process this lecture audio and organize it into the requested schema structure."
                 
-                # Invoke Gemini 3.5 Flash for rapid audio understanding multimodal loops
+                # Using the modern SDK response_schema configurations
                 response = client.models.generate_content(
                     model='gemini-3.5-flash',
                     contents=[prompt, audio_media],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
+                        response_schema=StudyGuideSchema, # ⚡ Crucial: Forces native schema validation
                         temperature=0.2
                     )
                 )
                 
-                # Cleanup the cloud uploaded file reference after processing
+                # Cleanup the cloud asset context instance post-generation
                 client.files.delete(name=audio_media.name)
                 
-                # Save structured elements out to persistent runtime memory context
-                st.session_state.study_data = json.loads(response.text)
+                # The modern SDK automatically parses verified fields out into response.parsed
+                st.session_state.study_data = response.parsed
                 st.session_state.quiz_submitted = False
                 st.session_state.quiz_answers = {}
                 st.success("Study materials generated successfully!")
@@ -134,11 +137,10 @@ if client and uploaded_file:
             except Exception as e:
                 st.error(f"Processing failed: {e}")
             finally:
-                # Clean up local system OS temp directory paths 
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)
 
-# 5. Dynamic Dashboard UI
+# 6. Dynamic Dashboard UI
 if "study_data" in st.session_state:
     data = st.session_state.study_data
     
@@ -146,25 +148,24 @@ if "study_data" in st.session_state:
     
     with tab1:
         st.header("Lecture Summary Breakdowns")
-        st.markdown(data.get("summary", "No summary generated."))
+        # Direct dot notation instead of dict dictionary lookups due to parsing as a Pydantic object
+        st.markdown(data.summary)
         
     with tab2:
         st.header("Hover Cards to Flip")
-        flashcards = data.get("flashcards", [])
         
-        # Grid layout deployment for cards
         cols = st.columns(2)
-        for idx, card in enumerate(flashcards):
+        for idx, card in enumerate(data.flashcards):
             col = cols[idx % 2]
             with col:
                 card_html = f"""
                 <div class="flip-card">
                     <div class="flip-card-inner">
                         <div class="flip-card-front">
-                            <strong>{card.get('front')}</strong>
+                            <strong>{card.front}</strong>
                         </div>
                         <div class="flip-card-back">
-                            <span>{card.get('back')}</span>
+                            <span>{card.back}</span>
                         </div>
                     </div>
                 </div>
@@ -173,15 +174,13 @@ if "study_data" in st.session_state:
                 
     with tab3:
         st.header("Test Your Understanding")
-        quiz = data.get("quiz", [])
         
-        for idx, item in enumerate(quiz):
-            st.markdown(f"**Q{idx+1}: {item.get('question')}**")
+        for idx, item in enumerate(data.quiz):
+            st.markdown(f"**Q{idx+1}: {item.question}**")
             
-            # Persist selection states across interactive context reruns
             current_choice = st.radio(
                 f"Select an option for question {idx+1}:", 
-                options=item.get("options", []), 
+                options=item.options, 
                 key=f"q_radio_{idx}",
                 label_visibility="collapsed"
             )
@@ -196,10 +195,9 @@ if "study_data" in st.session_state:
             st.markdown("---")
             st.subheader("Results:")
             
-            for idx, item in enumerate(quiz):
+            for idx, item in enumerate(data.quiz):
                 user_ans = st.session_state.quiz_answers.get(idx)
-                correct_idx = item.get("correct_index", 0)
-                correct_ans = item.get("options")[correct_idx]
+                correct_ans = item.options[item.correct_index]
                 
                 if user_ans == correct_ans:
                     score += 1
@@ -207,7 +205,7 @@ if "study_data" in st.session_state:
                 else:
                     st.error(f"❌ **Question {idx+1}: Incorrect.** You chose: {user_ans} | **Correct Answer:** {correct_ans}")
                     
-            st.metric(label="Final Score", value=f"{score} / {len(quiz)}")
+            st.metric(label="Final Score", value=f"{score} / {len(data.quiz)}")
 
 elif not api_key:
     st.warning("Please configure your Gemini API token to begin processing audio files.")
