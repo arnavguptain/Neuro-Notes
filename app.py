@@ -114,14 +114,14 @@ if client and uploaded_file:
                 )
                 
                 # Invoke Gemini 2.5 Flash for rapid audio understanding multimodal loops
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=[prompt, audio_media],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.2
-                    )
-                )
+response = client.models.generate_content(
+    model='gemini-2.5-flash',  # ❌ Old, unavailable model name
+    contents=[prompt, audio_media],
+    config=types.GenerateContentConfig(
+        response_mime_type="application/json",
+        temperature=0.2
+    )
+)
                 
                 # Cleanup the cloud uploaded file reference after processing
                 client.files.delete(name=audio_media.name)
