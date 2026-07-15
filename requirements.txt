@@ -2,3 +2,6 @@ google-genai
 streamlit
 pydantic
 gTTS
+opencv-python-headless
+numpy
+pillow
